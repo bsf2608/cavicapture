@@ -3,18 +3,18 @@
 from configparser import ConfigParser
 import sqlite3
 import sys, os, getopt
-import time, datetime
+import time
 import glob
-import string
 from datetime import datetime
 from shutil import copyfile
 
 def main():
 
-    input_directory = ''
-    output_directory = ''
-    file_mask = ''
-    sequence_name = ''
+    input_directory = None
+    output_directory = None
+    file_mask = None
+    sequence_name = None
+    config_path = None
 
     try:
       opts, args = getopt.getopt(sys.argv[1:], "c:i:o:s:f:", ["config=", "input_dir=", "output_dir=", "sequence_name=", "file_mask="])
@@ -22,6 +22,7 @@ def main():
       print("seq_converter.py --config <path/to/config.ini> --input_dir <path/to/capture/directory> --output_dir <path/to/new/directory --sequence_name= <name> --file_mask <mask>")
       sys.exit(2)
     
+    config_path = None
     for opt, arg in opts:
       if opt in ("--config"):
         config_path = arg
@@ -33,6 +34,13 @@ def main():
         file_mask = arg
       elif opt in ("--sequence_name"):
         sequence_name = arg
+    
+    missing = [n for n, v in [('--input_dir', input_directory), ('--output_dir', output_directory),
+                               ('--file_mask', file_mask), ('--sequence_name', sequence_name),
+                               ('--config', config_path)] if v is None]
+    if missing:
+        print("Error: missing required arguments: " + ", ".join(missing))
+        sys.exit(2)
       
     cavi_converter = CaviConverter(config_path, input_directory, output_directory, file_mask, sequence_name)
     cavi_converter.init()
@@ -62,8 +70,8 @@ class CaviConverter:
 
   def write_config(self):
 
-    self.config.set('capture', 'output_dir', self.output_directory.rstrip("/"));
-    self.config.set('capture', 'sequence_name', self.sequence_name);
+    self.config.set('capture', 'output_dir', self.output_directory.rstrip("/"))
+    self.config.set('capture', 'sequence_name', self.sequence_name)
 
     with open(os.path.join(self.output_sequence_path, "config.ini"), 'w') as config_file:
       self.config.write(config_file)    
@@ -71,21 +79,22 @@ class CaviConverter:
   def find_captures(self):
 
     # print(glob.glob("/home/adam/*.txt"))
-    for file_path in glob.glob(os.path.join(self.input_directory, self.file_mask)):
+    for file_path in sorted(glob.glob(os.path.join(self.input_directory, self.file_mask))):
       print("File " + file_path + "(" + os.path.basename(file_path) + ")")
       file_name = os.path.basename(file_path)
-      name = os.path.basename(file_path).replace(".png", "")
+      name = os.path.splitext(file_name)[0]
       file_time = datetime.strptime(name, '%Y%m%d-%H%M%S')
       print(file_time.strftime('%Y%m%d-%H%M%S'))
-      sql = "INSERT INTO captures (filename, timestamp, skip, processing, processed) VALUES ('" + file_name + "', '" + file_time.strftime('%Y%m%d-%H%M%S') + "', 0, 0, 0);"
-      self.db_conn.execute(sql)
+      sql = "INSERT INTO captures (filename, timestamp, skip, processing, processed) VALUES (?, ?, 0, 0, 0)"
+      self.db_conn.execute(sql, (file_name, file_time.strftime('%Y%m%d-%H%M%S')))
       self.db_conn.commit()
       copyfile(file_path,  os.path.join(self.output_sequence_path, file_name))
 
 
   def setup_directories(self):
     
-    self.output_sequence_path = os.path.join(self.output_directory, self.sequence_name)     
+    self.output_sequence_path = os.path.join(self.output_directory, self.sequence_name)
+    self.db_path = os.path.join(self.output_sequence_path, "capture.db")
 
     if not os.path.exists(self.output_directory):
       os.makedirs(self.output_directory)
@@ -96,6 +105,8 @@ class CaviConverter:
   def load_config(self):
 
     self.config = ConfigParser()
+    if not os.path.exists(self.config_file):
+        raise FileNotFoundError("Config file not found: " + self.config_file)
     self.config.read(self.config_file)
 
   def setup_db(self):

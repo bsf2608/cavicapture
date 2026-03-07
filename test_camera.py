@@ -16,5 +16,9 @@ picam2.start()
 # give the sensor some time to warm up
 time.sleep(2)
 
-picam2.capture_file("test_modern.jpg")
-print("Capture complete - check test_modern.jpg")
+try:
+    picam2.capture_file("test_modern.jpg")
+    print("Capture complete - check test_modern.jpg")
+finally:
+    picam2.stop()
+    picam2.close()

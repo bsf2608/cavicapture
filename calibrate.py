@@ -10,7 +10,7 @@ def main():
   config_path = './config.ini' # default
 
   try:
-    opts, args = getopt.getopt(sys.argv[1:], "c", ["config="])
+    opts, args = getopt.getopt(sys.argv[1:], "c:", ["config="])
   except getopt.GetoptError:
     print("Argument error")
     sys.exit(2)
@@ -37,11 +37,10 @@ class CaviCalibrate:
 
     self.cavi_capture = CaviCapture(config_path)
     self.cavi_capture.log_file = os.path.join(self.output_dir, "capture.log.txt")
-    self.cavi_capture.load_config()
-    self.cavi_capture.setup_gpio()
+    # load_config() and setup_gpio() already called by CaviCapture.__init__
     self.cavi_capture.setup_camera()
 
-    self.cavi_process = CaviProcess(self.output_dir)
+    self.cavi_process = CaviProcess(config_path, False, False)
     self.cavi_process.log_file = os.path.join(self.output_dir, "process.log.txt")
 
   def init_calibration(self):
@@ -70,12 +69,18 @@ class CaviCalibrate:
     # self.cavi_process.write_image(self.output_dir + "/diff.png", diff)
     # self.summarise(diff, self.output_dir + "/noise_hist.png")
 
+    import cv2
+    img1 = cv2.imread(file_1, 0)
+    img2 = cv2.imread(file_2, 0)
+    img3 = cv2.imread(file_3, 0)
+    img4 = cv2.imread(file_4, 0)
+
     # Image difference first two and last two
-    img_group_1_diff = self.cavi_process.subtract_images(file_1, file_2)
+    img_group_1_diff = self.cavi_process.subtract_images(img1, img2)
     self.cavi_process.write_image(os.path.join(self.output_dir, "image_group_1_diff.png"), img_group_1_diff)
     self.summarise(img_group_1_diff, os.path.join(self.output_dir, "image_group_1_diff_hist.png"))
 
-    img_group_2_diff = self.cavi_process.subtract_images(file_3, file_4)
+    img_group_2_diff = self.cavi_process.subtract_images(img3, img4)
     self.cavi_process.write_image(os.path.join(self.output_dir, "image_group_2_diff.png"), img_group_2_diff)
     self.summarise(img_group_2_diff, os.path.join(self.output_dir, "image_group_2_diff_hist.png"))
 
@@ -89,18 +94,25 @@ class CaviCalibrate:
 
   def summarise(self, img, hist_path):
 
-    average_pixel = np.average(img[img>0])
-    max_pixel = np.max(img[img>0])
-    min_pixel = np.min(img[img>0])
-    total_area = len(img[img>0])
+    nonzero = img[img>0]
+    if len(nonzero) == 0:
+        self.cavi_process.log("No noise pixels found (images may be identical)")
+        return
+
+    average_pixel = np.average(nonzero)
+    max_pixel = int(np.max(nonzero))
+    min_pixel = int(np.min(nonzero))
+    total_area = len(nonzero)
 
     self.cavi_process.log("Noise max: " + str(max_pixel))
     self.cavi_process.log("Noise min: " + str(min_pixel))
     self.cavi_process.log("Noise average: " + str(average_pixel))
     self.cavi_process.log("Noise area: " + str(total_area))
 
+    plt.figure() # Ensure fresh figure for each call
     plt.hist(img.ravel(),max_pixel,[min_pixel,max_pixel])
     plt.savefig(hist_path)
+    plt.close() # Free memory and clear state
 
   def gen_file_path(self):
     return os.path.join(self.output_dir, datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + ".png")
